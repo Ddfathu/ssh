@@ -1,28 +1,29 @@
-FROM alpine:3.19
+FROM ubuntu:22.04
 
-ENV LANG=C.UTF-8 \
-    DEBIAN_FRONTEND=noninteractive \
-    HOME=/root \
-    SSH_PORT=2222 \
-    DEFAULT_USER=nodeuser \
-    DEFAULT_PASS=TunnelCoreSecureAuth2026!
+ENV DEBIAN_FRONTEND=noninteractive
 
-# Install tools yang beneran dibutuhin aja (Tanpa Nginx & Xray)
-RUN apk update && apk add --no-cache bash openssh-server openssh-sftp-server supervisor jq tzdata && rm -rf /var/cache/apk/*
+# Install openssh-server, stunnel4, dan sudo
+RUN apt-get update && apt-get install -y \
+    openssh-server \
+    stunnel4 \
+    sudo \
+    openssl \
+    && rm -rf /var/lib/apt/lists/*
 
-RUN mkdir -p /usr/local/bin /var/run/sshd /var/log/supervisor /etc/tunnel_config
+# Buat folder runtime yang dibutuhkan
+RUN mkdir -p /var/run/sshd /etc/stunnel
 
-# Copy binary dan script pendukung
-COPY gost /usr/local/bin/gost
+# HACK: Generate sertifikat SSL internal (stunnel.pem) otomatis saat build
+RUN openssl req -new -newkey rsa:2048 -days 365 -nodes -x509 \
+    -subj "/C=ID/ST=Jakarta/L=Jakarta/O=Tunnel/CN=sshrail.up.railway.app" \
+    -keyout /etc/stunnel/stunnel.pem -out /etc/stunnel/stunnel.pem
+
+# Konfigurasi SSH dasar
+RUN sed -i 's/#PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config \
+    && sed -i 's/#PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
+
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
-COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
-
-RUN chmod +x /usr/local/bin/entrypoint.sh && \
-    chmod +x /usr/local/bin/gost && \
-    ssh-keygen -A && \
-    sed -i 's/#PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config && \
-    sed -i 's/#PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config && \
-    echo "GatewayPorts yes" >> /etc/ssh/sshd_config
+RUN chmod +x /usr/local/bin/entrypoint.sh
 
 EXPOSE 8080
 
